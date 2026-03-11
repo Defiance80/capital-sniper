@@ -142,7 +142,14 @@ int OnInit()
     //--- Set trade parameters
     trade.SetExpertMagicNumber(MagicBase);
     trade.SetDeviationInPoints(10);
-    trade.SetTypeFilling(ORDER_FILLING_FOK);
+    //--- Auto-detect filling mode (varies by broker)
+    long fillType = SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE);
+    if((fillType & SYMBOL_FILLING_FOK) != 0)
+        trade.SetTypeFilling(ORDER_FILLING_FOK);
+    else if((fillType & SYMBOL_FILLING_IOC) != 0)
+        trade.SetTypeFilling(ORDER_FILLING_IOC);
+    else
+        trade.SetTypeFilling(ORDER_FILLING_RETURN);
     
     WriteLog("Initialization completed successfully");
     return(INIT_SUCCEEDED);
