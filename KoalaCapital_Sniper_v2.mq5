@@ -32,7 +32,7 @@ Version 2.00 Changelog:
 #include <Trade\Trade.mqh>
 
 //--- Input parameters
-input group "=== RISK MANAGEMENT ==="
+//--- Risk Management
 input double   BaseRiskPercent = 0.75;        // Risk per trade as % of equity
 input double   MaxDailyLossPercent = 30.0;    // Daily drawdown halt %
 input double   MaxDrawdownFromPeak = 20.0;    // Trailing drawdown halt %
@@ -40,7 +40,7 @@ input int      MaxSetupsPerSession = 3;       // Max setups per symbol per sessi
 input int      MaxTradesPerSymbol = 3;        // Max open positions per symbol
 input double   MaxSpreadPips = 3.0;           // Skip entry if spread > this
 
-input group "=== STRATEGY PARAMETERS ==="
+//--- Strategy Parameters
 input int      SLBufferPips = 2;              // Stop loss buffer in pips
 input int      BreakEvenPoints = 15;          // Break-even trigger in points
 input double   PartialClosePct = 0.25;        // Partial close percentage (25%)
@@ -51,16 +51,15 @@ input int      FVGDeviationPips = 10;         // FVG detection deviation
 input int      WyckoffLookback = 3;           // Wyckoff confirmation lookback
 input int      ExhaustionPips = 20;           // Exhaustion filter threshold
 
-input group "=== SYSTEM SETTINGS ==="
+//--- System Settings
 input int      MagicBase = 987654;            // Base magic number
 input bool     EnableLogging = true;          // Enable trade logging
-input int      OrderRetries = 3;              // Max retry attempts for failed orders
+input int      OrderRetries = 3;             // Max retry attempts for failed orders
 
 //--- Global variables
 CTrade         trade;
-string         tradedSymbols[] = {"EURUSD", "GBPUSD", "USDJPY", "USDCAD", "AUDUSD", 
-                                  "NZDUSD", "USDCHF", "EURJPY", "GBPJPY", "XAUUSD"};
-int            totalSymbols = ArraySize(tradedSymbols);
+string         tradedSymbols[];
+int            totalSymbols = 10;
 
 //--- Session tracking
 struct SessionData {
@@ -82,6 +81,21 @@ bool   equityInitialized = false;
 //--- Dynamic arrays
 double wyckoffPrices[];
 
+//+------------------------------------------------------------------+
+//| Get pip value for a symbol (handles 3/5 digit brokers + XAUUSD) |
+//+------------------------------------------------------------------+
+double PipValue(string symbol)
+{
+    int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+    double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
+    // 5-digit forex (EURUSD etc) or 3-digit (USDJPY etc): 1 pip = 10 points
+    // 2-digit (XAUUSD) or 4-digit: 1 pip = 1 point
+    if(digits == 5 || digits == 3)
+        return point * 10.0;
+    else
+        return point;
+}
+
 //--- File handle for logging
 int    logFileHandle = INVALID_HANDLE;
 
@@ -90,6 +104,13 @@ int    logFileHandle = INVALID_HANDLE;
 //+------------------------------------------------------------------+
 int OnInit()
 {
+    //--- Initialize symbol list
+    ArrayResize(tradedSymbols, 10);
+    tradedSymbols[0] = "EURUSD"; tradedSymbols[1] = "GBPUSD"; tradedSymbols[2] = "USDJPY";
+    tradedSymbols[3] = "USDCAD"; tradedSymbols[4] = "AUDUSD"; tradedSymbols[5] = "NZDUSD";
+    tradedSymbols[6] = "USDCHF"; tradedSymbols[7] = "EURJPY"; tradedSymbols[8] = "GBPJPY";
+    tradedSymbols[9] = "XAUUSD";
+    
     //--- Initialize arrays
     ArrayResize(sessionData, totalSymbols);
     ArrayResize(wyckoffPrices, WyckoffLookback);
@@ -176,8 +197,11 @@ void CheckSessionReset()
     static bool londonResetDone = false;
     if(currentHour == 8 && !londonResetDone) {
         ResetSessionCounters(true, false); // London only
+        sessionEquityStart = AccountInfoDouble(ACCOUNT_EQUITY);
+        floatingPeak = sessionEquityStart;
+        stopAllTrading = false;
         londonResetDone = true;
-        WriteLog("London session reset at 08:00");
+        WriteLog("London session reset at 08:00 - Equity: " + DoubleToString(sessionEquityStart, 2));
     } else if(currentHour != 8) {
         londonResetDone = false;
     }
@@ -186,19 +210,16 @@ void CheckSessionReset()
     static bool nyResetDone = false;
     if(currentHour == 13 && !nyResetDone) {
         ResetSessionCounters(false, true); // NY only
+        sessionEquityStart = AccountInfoDouble(ACCOUNT_EQUITY);
+        floatingPeak = sessionEquityStart;
+        stopAllTrading = false;
         nyResetDone = true;
-        WriteLog("NY session reset at 13:00");
+        WriteLog("NY session reset at 13:00 - Equity: " + DoubleToString(sessionEquityStart, 2));
     } else if(currentHour != 13) {
         nyResetDone = false;
     }
     
-    //--- Reset equity tracking at major session starts
-    if((currentHour == 8 && !londonResetDone) || (currentHour == 13 && !nyResetDone)) {
-        sessionEquityStart = AccountInfoDouble(ACCOUNT_EQUITY);
-        floatingPeak = sessionEquityStart;
-        stopAllTrading = false;
-        WriteLog("Equity tracking reset - New baseline: " + DoubleToString(sessionEquityStart, 2));
-    }
+    //--- Note: equity baseline is set at session open via the reset blocks above
 }
 
 //+------------------------------------------------------------------+
@@ -352,7 +373,7 @@ void CheckSymbolEntry(string symbol, int symbolIndex)
     //--- Check FVG patterns
     double symbolPoint = SymbolInfoDouble(symbol, SYMBOL_POINT);
     int symbolDigits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
-    double deviation = FVGDeviationPips * symbolPoint * MathPow(10, symbolDigits-4);
+    double deviation = FVGDeviationPips * PipValue(symbol);
     
     //--- Bearish FVG (rates[3].high > rates[4].high + deviation)
     if(rates[3].high > rates[4].high + deviation) {
@@ -396,7 +417,7 @@ bool IsExhausted(string symbol, const MqlRates &rates[])
 {
     double symbolPoint = SymbolInfoDouble(symbol, SYMBOL_POINT);
     int symbolDigits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
-    double exhaustionDistance = ExhaustionPips * symbolPoint * MathPow(10, symbolDigits-4);
+    double exhaustionDistance = ExhaustionPips * PipValue(symbol);
     
     //--- Check most recent closed bar range
     double recentRange = rates[0].high - rates[0].low;
@@ -415,10 +436,10 @@ void PlaceStackedOrders(string symbol, int symbolIndex, ENUM_ORDER_TYPE orderTyp
     //--- Calculate SL and TP
     double slPrice, tpPrice;
     if(orderType == ORDER_TYPE_SELL_LIMIT) {
-        slPrice = rates[4].high + SLBufferPips * symbolPoint * MathPow(10, symbolDigits-4);
+        slPrice = rates[4].high + SLBufferPips * PipValue(symbol);
         tpPrice = baseEntry - BreakEvenPoints * 2 * symbolPoint;
     } else {
-        slPrice = rates[4].low - SLBufferPips * symbolPoint * MathPow(10, symbolDigits-4);
+        slPrice = rates[4].low - SLBufferPips * PipValue(symbol);
         tpPrice = baseEntry + BreakEvenPoints * 2 * symbolPoint;
     }
     
@@ -648,7 +669,7 @@ void MoveToBreakEven(string symbol, ulong ticket, double openPrice)
     double currentSL = PositionGetDouble(POSITION_SL);
     double symbolPoint = SymbolInfoDouble(symbol, SYMBOL_POINT);
     int symbolDigits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
-    double buffer = SLBufferPips * symbolPoint * MathPow(10, symbolDigits-4);
+    double buffer = SLBufferPips * PipValue(symbol);
     
     double newSL;
     if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) {
@@ -683,20 +704,14 @@ void PartialClosePosition(string symbol, ulong ticket)
         return;
     }
     
-    //--- Check if position was already partially closed
-    static datetime lastPartialClose[];
-    int symbolIndex = GetSymbolIndex(symbol);
-    if(symbolIndex >= 0) {
-        ArrayResize(lastPartialClose, totalSymbols);
-        if(TimeCurrent() - lastPartialClose[symbolIndex] < 300) { // 5 minutes cooldown
-            return;
-        }
+    //--- Check if position was already partially closed (use ticket as key via comment check)
+    static datetime lastPartialCloseTime = 0;
+    if(TimeCurrent() - lastPartialCloseTime < 300) { // 5 minutes cooldown between any partial closes
+        return;
     }
     
     if(trade.PositionClosePartial(ticket, closeVolume)) {
-        if(symbolIndex >= 0) {
-            lastPartialClose[symbolIndex] = TimeCurrent();
-        }
+        lastPartialCloseTime = TimeCurrent();
         WriteLog("Partial close executed for " + symbol + " ticket " + IntegerToString(ticket) + 
                 " Volume: " + DoubleToString(closeVolume, 2));
     }
@@ -712,7 +727,7 @@ void ApplyTrailingStop(string symbol, ulong ticket, double currentPrice)
     double currentSL = PositionGetDouble(POSITION_SL);
     double symbolPoint = SymbolInfoDouble(symbol, SYMBOL_POINT);
     int symbolDigits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
-    double trailDistance = TrailingStepPips * symbolPoint * MathPow(10, symbolDigits-4);
+    double trailDistance = TrailingStepPips * PipValue(symbol);
     
     double newSL;
     if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) {
@@ -756,11 +771,14 @@ int CountOpenTrades(string symbol)
 //+------------------------------------------------------------------+
 double GetSpreadInPips(string symbol)
 {
-    double spread = SymbolInfoInteger(symbol, SYMBOL_SPREAD);
-    double symbolPoint = SymbolInfoDouble(symbol, SYMBOL_POINT);
+    long spread = SymbolInfoInteger(symbol, SYMBOL_SPREAD);
     int symbolDigits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
     
-    return spread * symbolPoint * MathPow(10, symbolDigits-4) / symbolPoint;
+    // Convert spread points to pips (5-digit=10pts per pip, 3-digit=10pts per pip, 2-digit=1pt per pip)
+    if(symbolDigits == 5 || symbolDigits == 3)
+        return (double)spread / 10.0;
+    else
+        return (double)spread;
 }
 
 //+------------------------------------------------------------------+
