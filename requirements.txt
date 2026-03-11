@@ -1,0 +1,26 @@
+# KoalaCapital Sniper v2.0 - Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# MetaTrader5 Python integration package
+MetaTrader5>=5.0.45
+
+# Core dependencies (usually included in Python standard library)
+# These are listed for completeness but may not need separate installation
+datetime
+logging
+time
+math
+os
+sys
+dataclasses
+typing
+
+# Optional: Enhanced logging and monitoring
+# coloredlogs>=15.0  # For colored console output
+# psutil>=5.9.0     # For system monitoring
+# numpy>=1.21.0     # For advanced calculations (if needed)
+
+# Development dependencies (uncomment if needed)
+# pytest>=7.0.0     # For testing
+# black>=22.0.0     # For code formatting
+# pylint>=2.15.0    # For code linting
