@@ -104,12 +104,15 @@ int    logFileHandle = INVALID_HANDLE;
 //+------------------------------------------------------------------+
 int OnInit()
 {
+    Print("KoalaSniper v2: OnInit() starting...");
+    
     //--- Initialize symbol list
     ArrayResize(tradedSymbols, 10);
     tradedSymbols[0] = "EURUSD"; tradedSymbols[1] = "GBPUSD"; tradedSymbols[2] = "USDJPY";
     tradedSymbols[3] = "USDCAD"; tradedSymbols[4] = "AUDUSD"; tradedSymbols[5] = "NZDUSD";
     tradedSymbols[6] = "USDCHF"; tradedSymbols[7] = "EURJPY"; tradedSymbols[8] = "GBPJPY";
     tradedSymbols[9] = "XAUUSD";
+    Print("KoalaSniper v2: Symbols initialized");
     
     //--- Initialize arrays
     ArrayResize(sessionData, totalSymbols);
@@ -123,35 +126,43 @@ int OnInit()
         sessionData[i].nySessionStarted = false;
         sessionData[i].lastSessionReset = 0;
     }
+    Print("KoalaSniper v2: Session data initialized");
     
     //--- Initialize equity tracking
     sessionEquityStart = AccountInfoDouble(ACCOUNT_EQUITY);
     floatingPeak = sessionEquityStart;
     equityInitialized = true;
+    Print("KoalaSniper v2: Equity baseline = " + DoubleToString(sessionEquityStart, 2));
     
     //--- Initialize logging
     if(EnableLogging) {
-        string fileName = "KoalaSniper_" + TimeToString(TimeCurrent(), TIME_DATE) + ".log";
-        logFileHandle = FileOpen(fileName, FILE_WRITE | FILE_TXT | FILE_ANSI);
+        MqlDateTime dt;
+        TimeToStruct(TimeCurrent(), dt);
+        string fileName = "KoalaSniper_" + IntegerToString(dt.year) + "-" + 
+                          IntegerToString(dt.mon, 2, '0') + "-" + 
+                          IntegerToString(dt.day, 2, '0') + ".log";
+        logFileHandle = FileOpen(fileName, FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_SHARE_READ);
         if(logFileHandle != INVALID_HANDLE) {
-            WriteLog("EA Initialized - Version 2.00");
-            WriteLog("Account Equity: " + DoubleToString(sessionEquityStart, 2));
+            Print("KoalaSniper v2: Log file opened: " + fileName);
+        } else {
+            Print("KoalaSniper v2: WARNING - Could not open log file: " + fileName + " Error: " + IntegerToString(GetLastError()));
         }
     }
     
     //--- Set trade parameters
     trade.SetExpertMagicNumber(MagicBase);
     trade.SetDeviationInPoints(10);
-    //--- Auto-detect filling mode (varies by broker)
-    long fillType = SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE);
-    if((fillType & SYMBOL_FILLING_FOK) != 0)
-        trade.SetTypeFilling(ORDER_FILLING_FOK);
-    else if((fillType & SYMBOL_FILLING_IOC) != 0)
-        trade.SetTypeFilling(ORDER_FILLING_IOC);
-    else
-        trade.SetTypeFilling(ORDER_FILLING_RETURN);
+    trade.SetTypeFilling(ORDER_FILLING_RETURN); // Safest default, works on all brokers
     
-    WriteLog("Initialization completed successfully");
+    Print("KoalaSniper v2: Trade object configured");
+    Print("KoalaSniper v2: OnInit() completed successfully");
+    
+    if(EnableLogging && logFileHandle != INVALID_HANDLE) {
+        WriteLog("EA Initialized - Version 2.00");
+        WriteLog("Account Equity: " + DoubleToString(sessionEquityStart, 2));
+        WriteLog("Chart Symbol: " + _Symbol);
+    }
+    
     return(INIT_SUCCEEDED);
 }
 
@@ -160,9 +171,11 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
+    Print("KoalaSniper v2: OnDeinit() called - Reason code: " + IntegerToString(reason));
     if(logFileHandle != INVALID_HANDLE) {
         WriteLog("EA Deinitialized - Reason: " + IntegerToString(reason));
         FileClose(logFileHandle);
+        logFileHandle = INVALID_HANDLE;
     }
 }
 
@@ -171,6 +184,13 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
+    //--- Debug: confirm EA is alive (only prints once)
+    static bool firstTick = true;
+    if(firstTick) {
+        Print("KoalaSniper v2: First tick received on " + _Symbol);
+        firstTick = false;
+    }
+    
     //--- Check session resets (once per day only)
     CheckSessionReset();
     
