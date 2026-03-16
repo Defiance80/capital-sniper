@@ -634,7 +634,8 @@ int GetSymbolIndex(string symbol) {
 //| Get spread in pips                                              |
 //+------------------------------------------------------------------+
 double GetSpreadPips(string symbol) {
-    double spread = SymbolInfoInteger(symbol, SYMBOL_SPREAD);
+    long spreadLong = SymbolInfoInteger(symbol, SYMBOL_SPREAD);
+    double spread = (double)spreadLong;
     double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
     
     int symbolIndex = GetSymbolIndex(symbol);
@@ -718,7 +719,7 @@ void ScanForSignals() {
         }
         
         // Get market data
-        double rates[][6];
+        MqlRates rates[];
         if(CopyRates(symbol, LTFTimeframe, 0, 100, rates) <= 0) {
             continue;
         }
@@ -734,11 +735,11 @@ void ScanForSignals() {
 //+------------------------------------------------------------------+
 //| Update market structure for SMC analysis                        |
 //+------------------------------------------------------------------+
-void UpdateMarketStructure(string symbol, double &rates[][6]) {
+void UpdateMarketStructure(string symbol, MqlRates &rates[]) {
     int symbolIndex = GetSymbolIndex(symbol);
     if(symbolIndex < 0) return;
     
-    int rateCount = ArrayRange(rates, 0);
+    int rateCount = ArraySize(rates);
     if(rateCount < StructureLookback * 2 + 1) return;
     
     // Calculate swing highs and lows
@@ -754,8 +755,8 @@ void UpdateMarketStructure(string symbol, double &rates[][6]) {
 //+------------------------------------------------------------------+
 //| Calculate swing highs and lows                                  |
 //+------------------------------------------------------------------+
-void CalculateSwings(int symbolIndex, double &rates[][6]) {
-    int rateCount = ArrayRange(rates, 0);
+void CalculateSwings(int symbolIndex, MqlRates &rates[]) {
+    int rateCount = ArraySize(rates);
     
     // Dynamic array sizing for Wyckoff patterns
     ArrayResize(g_marketStructure[symbolIndex].swingHighs, 20, 10);
@@ -769,30 +770,30 @@ void CalculateSwings(int symbolIndex, double &rates[][6]) {
         // Check for swing high
         bool isSwingHigh = true;
         for(int j = i - StructureLookback; j <= i + StructureLookback; j++) {
-            if(j != i && rates[j][2] >= rates[i][2]) {  // High comparison
+            if(j != i && rates[j].high >= rates[i].high) {  // High comparison
                 isSwingHigh = false;
                 break;
             }
         }
         
         if(isSwingHigh && highCount < 20) {
-            g_marketStructure[symbolIndex].swingHighs[highCount] = rates[i][2];
-            g_marketStructure[symbolIndex].swingHighTimes[highCount] = (datetime)rates[i][0];
+            g_marketStructure[symbolIndex].swingHighs[highCount] = rates[i].high;
+            g_marketStructure[symbolIndex].swingHighTimes[highCount] = (datetime)rates[i].time;
             highCount++;
         }
         
         // Check for swing low
         bool isSwingLow = true;
         for(int j = i - StructureLookback; j <= i + StructureLookback; j++) {
-            if(j != i && rates[j][3] <= rates[i][3]) {  // Low comparison
+            if(j != i && rates[j].low <= rates[i].low) {  // Low comparison
                 isSwingLow = false;
                 break;
             }
         }
         
         if(isSwingLow && lowCount < 20) {
-            g_marketStructure[symbolIndex].swingLows[lowCount] = rates[i][3];
-            g_marketStructure[symbolIndex].swingLowTimes[lowCount] = (datetime)rates[i][0];
+            g_marketStructure[symbolIndex].swingLows[lowCount] = rates[i].low;
+            g_marketStructure[symbolIndex].swingLowTimes[lowCount] = (datetime)rates[i].time;
             lowCount++;
         }
     }
@@ -801,8 +802,8 @@ void CalculateSwings(int symbolIndex, double &rates[][6]) {
 //+------------------------------------------------------------------+
 //| Determine HTF bias                                              |
 //+------------------------------------------------------------------+
-void DetermineHTFBias(int symbolIndex, double &rates[][6]) {
-    int rateCount = ArrayRange(rates, 0);
+void DetermineHTFBias(int symbolIndex, MqlRates &rates[]) {
+    int rateCount = ArraySize(rates);
     if(rateCount < 2) {
         g_marketStructure[symbolIndex].htfBias = "neutral";
         return;
@@ -836,7 +837,7 @@ void DetermineHTFBias(int symbolIndex, double &rates[][6]) {
         }
     }
     
-    double currentPrice = rates[rateCount-1][4];  // Close price
+    double currentPrice = rates[rateCount-1].close;  // Close price
     
     // Simple bias determination based on recent structure breaks
     if(latestHighTime > latestLowTime) {
@@ -863,7 +864,7 @@ void DetermineHTFBias(int symbolIndex, double &rates[][6]) {
 //+------------------------------------------------------------------+
 //| Calculate premium/discount zones                                |
 //+------------------------------------------------------------------+
-void CalculatePremiumDiscount(int symbolIndex, double &rates[][6]) {
+void CalculatePremiumDiscount(int symbolIndex, MqlRates &rates[]) {
     int highCount = ArraySize(g_marketStructure[symbolIndex].swingHighs);
     int lowCount = ArraySize(g_marketStructure[symbolIndex].swingLows);
     
@@ -878,8 +879,8 @@ void CalculatePremiumDiscount(int symbolIndex, double &rates[][6]) {
     double recentHigh = g_marketStructure[symbolIndex].swingHighs[highCount-1];
     double recentLow = g_marketStructure[symbolIndex].swingLows[lowCount-1];
     
-    int rateCount = ArrayRange(rates, 0);
-    double currentPrice = rates[rateCount-1][4];  // Close price
+    int rateCount = ArraySize(rates);
+    double currentPrice = rates[rateCount-1].close;  // Close price
     
     double equilibrium = (recentHigh + recentLow) / 2.0;
     
@@ -893,8 +894,8 @@ void CalculatePremiumDiscount(int symbolIndex, double &rates[][6]) {
 //+------------------------------------------------------------------+
 //| Detect FVG patterns (Fair Value Gaps)                          |
 //+------------------------------------------------------------------+
-void DetectFVGPatterns(string symbol, double &rates[][6]) {
-    int rateCount = ArrayRange(rates, 0);
+void DetectFVGPatterns(string symbol, MqlRates &rates[]) {
+    int rateCount = ArraySize(rates);
     if(rateCount < 5) return;
     
     int symbolIndex = GetSymbolIndex(symbol);
@@ -906,13 +907,13 @@ void DetectFVGPatterns(string symbol, double &rates[][6]) {
     
     // Check last 5 bars for FVG patterns
     for(int i = 2; i < rateCount - 2; i++) {
-        double bar1High = rates[i-2][2];
-        double bar1Low = rates[i-2][3];
-        double bar3High = rates[i][2];
-        double bar3Low = rates[i][3];
+        double bar1High = rates[i-2].high;
+        double bar1Low = rates[i-2].low;
+        double bar3High = rates[i].high;
+        double bar3Low = rates[i].low;
         
-        double currentLow = rates[rateCount-1][3];
-        double currentHigh = rates[rateCount-1][2];
+        double currentLow = rates[rateCount-1].low;
+        double currentHigh = rates[rateCount-1].high;
         
         // Bullish FVG: bar1.high < bar3.low (gap up)
         if(bar1High < bar3Low - deviation) {
@@ -957,15 +958,15 @@ void DetectFVGPatterns(string symbol, double &rates[][6]) {
 //+------------------------------------------------------------------+
 //| Calculate signal confidence                                      |
 //+------------------------------------------------------------------+
-double CalculateSignalConfidence(string symbol, double &rates[][6], string signalType, int barIndex) {
+double CalculateSignalConfidence(string symbol, MqlRates &rates[], string signalType, int barIndex) {
     double confidence = 0.5;  // Base confidence
     
-    int rateCount = ArrayRange(rates, 0);
+    int rateCount = ArraySize(rates);
     
     // ATR-based momentum check
     double atr = CalculateATR(symbol, rates, barIndex);
     if(atr > 0) {
-        double recentRange = rates[barIndex][2] - rates[barIndex][3];  // High - Low
+        double recentRange = rates[barIndex].high - rates[barIndex].low;  // High - Low
         if(recentRange < atr * 0.8) {  // Lower volatility = higher confidence
             confidence += 0.2;
         }
@@ -976,10 +977,10 @@ double CalculateSignalConfidence(string symbol, double &rates[][6], string signa
     if(barIndex >= maPeriod) {
         double maSum = 0;
         for(int i = barIndex - maPeriod; i < barIndex; i++) {
-            maSum += rates[i][4];  // Close price
+            maSum += rates[i].close;  // Close price
         }
         double ma = maSum / maPeriod;
-        double currentClose = rates[barIndex][4];
+        double currentClose = rates[barIndex].close;
         
         if(signalType == "BUY" && currentClose > ma) {
             confidence += 0.15;
@@ -992,13 +993,13 @@ double CalculateSignalConfidence(string symbol, double &rates[][6], string signa
     if(barIndex >= 5) {
         double priceSum = 0;
         for(int i = barIndex - 5; i < barIndex; i++) {
-            priceSum += rates[i][4];
+            priceSum += rates[i].close;
         }
         double avgPrice = priceSum / 5.0;
         
         double priceStdDev = 0;
         for(int i = barIndex - 5; i < barIndex; i++) {
-            priceStdDev += MathPow(rates[i][4] - avgPrice, 2);
+            priceStdDev += MathPow(rates[i].close - avgPrice, 2);
         }
         priceStdDev = MathSqrt(priceStdDev / 5.0);
         
@@ -1013,7 +1014,7 @@ double CalculateSignalConfidence(string symbol, double &rates[][6], string signa
 //+------------------------------------------------------------------+
 //| Calculate ATR                                                   |
 //+------------------------------------------------------------------+
-double CalculateATR(string symbol, double &rates[][6], int endIndex) {
+double CalculateATR(string symbol, MqlRates &rates[], int endIndex) {
     int startIndex = MathMax(0, endIndex - ATRPeriod);
     if(endIndex - startIndex < 2) return 0.0;
     
@@ -1021,9 +1022,9 @@ double CalculateATR(string symbol, double &rates[][6], int endIndex) {
     int trCount = 0;
     
     for(int i = startIndex + 1; i <= endIndex; i++) {
-        double tr1 = rates[i][2] - rates[i][3];  // High - Low
-        double tr2 = MathAbs(rates[i][2] - rates[i-1][4]);  // High - Previous Close
-        double tr3 = MathAbs(rates[i][3] - rates[i-1][4]);  // Low - Previous Close
+        double tr1 = rates[i].high - rates[i].low;  // High - Low
+        double tr2 = MathAbs(rates[i].high - rates[i-1].close);  // High - Previous Close
+        double tr3 = MathAbs(rates[i].low - rates[i-1].close);  // Low - Previous Close
         
         double tr = MathMax(tr1, MathMax(tr2, tr3));
         trSum += tr;
@@ -1036,7 +1037,7 @@ double CalculateATR(string symbol, double &rates[][6], int endIndex) {
 //+------------------------------------------------------------------+
 //| Validate signal against conservative filters                    |
 //+------------------------------------------------------------------+
-bool ValidateSignalConservative(string symbol, double &rates[][6], string signalType, double entryPrice, double slPrice) {
+bool ValidateSignalConservative(string symbol, MqlRates &rates[], string signalType, double entryPrice, double slPrice) {
     int symbolIndex = GetSymbolIndex(symbol);
     if(symbolIndex < 0) return false;
     
@@ -1073,15 +1074,15 @@ bool ValidateSignalConservative(string symbol, double &rates[][6], string signal
 //+------------------------------------------------------------------+
 //| Apply Wyckoff confirmation filter                               |
 //+------------------------------------------------------------------+
-bool ApplyWyckoffFilter(string symbol, double &rates[][6], string signalType) {
-    int rateCount = ArrayRange(rates, 0);
+bool ApplyWyckoffFilter(string symbol, MqlRates &rates[], string signalType) {
+    int rateCount = ArraySize(rates);
     if(rateCount < WyckoffLookback + 2) return false;
     
     // Check recent bars for Wyckoff patterns
-    double bar0Low = rates[rateCount-2][3];   // Most recent closed bar low
-    double bar0High = rates[rateCount-2][2];  // Most recent closed bar high
-    double bar1Low = rates[rateCount-3][3];   // Previous bar low
-    double bar1High = rates[rateCount-3][2];  // Previous bar high
+    double bar0Low = rates[rateCount-2].low;   // Most recent closed bar low
+    double bar0High = rates[rateCount-2].high;  // Most recent closed bar high
+    double bar1Low = rates[rateCount-3].low;   // Previous bar low
+    double bar1High = rates[rateCount-3].high;  // Previous bar high
     
     if(signalType == "BUY") {
         // Look for lower lows (accumulation/spring)
@@ -1095,8 +1096,8 @@ bool ApplyWyckoffFilter(string symbol, double &rates[][6], string signalType) {
 //+------------------------------------------------------------------+
 //| Apply exhaustion filter                                         |
 //+------------------------------------------------------------------+
-bool ApplyExhaustionFilter(string symbol, double &rates[][6]) {
-    int rateCount = ArrayRange(rates, 0);
+bool ApplyExhaustionFilter(string symbol, MqlRates &rates[]) {
+    int rateCount = ArraySize(rates);
     if(rateCount < 2) return false;
     
     int symbolIndex = GetSymbolIndex(symbol);
@@ -1110,8 +1111,8 @@ bool ApplyExhaustionFilter(string symbol, double &rates[][6]) {
     double thresholdDistance = thresholdPips * point * pointMultiplier;
     
     // Check most recent closed bar
-    double recentHigh = rates[rateCount-2][2];
-    double recentLow = rates[rateCount-2][3];
+    double recentHigh = rates[rateCount-2].high;
+    double recentLow = rates[rateCount-2].low;
     double barRange = recentHigh - recentLow;
     
     return barRange < thresholdDistance;  // True if NOT exhausted
@@ -1215,7 +1216,7 @@ double CalculatePositionSize(string symbol, double entryPrice, double slPrice, d
     
     // Normalize to lot step
     double lotStep = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
-    positionSize = NormalizeDouble(MathRound(positionSize / lotStep) * lotStep, 2);
+    positionSize = NormalizeDouble(MathFloor(positionSize / lotStep) * lotStep, 2);
     
     // Apply limits
     double minLot = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
@@ -1244,7 +1245,12 @@ bool PlaceConservativeOrder(string symbol, string signalType, double entryPrice,
     for(int attempt = 0; attempt < RetryAttempts; attempt++) {
         trade.SetExpertMagicNumber(magicNumber);
         
-        bool result = trade.OrderOpen(symbol, orderType, volume, 0, entryPrice, slPrice, tpPrice, ORDER_TIME_DAY, 0, comment);
+        bool result = false;
+        if(orderType == ORDER_TYPE_BUY_LIMIT) {
+            result = trade.BuyLimit(volume, entryPrice, symbol, slPrice, tpPrice, ORDER_TIME_DAY, 0, comment);
+        } else {
+            result = trade.SellLimit(volume, entryPrice, symbol, slPrice, tpPrice, ORDER_TIME_DAY, 0, comment);
+        }
         
         if(result) {
             return true;
@@ -1407,13 +1413,12 @@ void ManageSinglePosition() {
 //| Get position data index                                         |
 //+------------------------------------------------------------------+
 int GetPositionDataIndex(ulong ticket) {
+    if(!PositionSelectByTicket(ticket)) return -1;
+    datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
+    
     for(int i = 0; i < ArraySize(g_positionData); i++) {
-        // Use open time as identifier since ticket might be reused
-        if(PositionGetTicket(ticket) > 0) {
-            datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
-            if(g_positionData[i].openTime == openTime) {
-                return i;
-            }
+        if(g_positionData[i].openTime == openTime) {
+            return i;
         }
     }
     return -1;
@@ -1590,12 +1595,12 @@ void ApplyTrailingStopConservative(ulong ticket, string symbol, double currentPr
     if(!PositionSelectByTicket(ticket)) return;
     
     // Get recent rates for ATR calculation
-    double rates[][6];
+    MqlRates rates[];
     if(CopyRates(symbol, LTFTimeframe, 0, 50, rates) <= 0) {
         return;
     }
     
-    double atr = CalculateATR(symbol, rates, ArrayRange(rates, 0) - 1);
+    double atr = CalculateATR(symbol, rates, ArraySize(rates) - 1);
     if(atr == 0) return;
     
     // TIGHTER trailing distance (1.0x ATR)
@@ -1731,10 +1736,11 @@ void WriteLog(string message) {
     Print(logMessage);
     
     // Optional: Write to file
-    string filename = StringFormat("capital_sniper_conservative_%s.log", TimeToString(TimeCurrent(), TIME_DATE));
-    int file = FileOpen(filename, FILE_WRITE | FILE_TXT | FILE_ANSI, '\t');
+    string filename = "capital_sniper_conservative_" + TimeToString(TimeCurrent(), TIME_DATE) + ".log";
+    int file = FileOpen(filename, FILE_READ|FILE_WRITE|FILE_TXT|FILE_ANSI);
     if(file != INVALID_HANDLE) {
-        FileWrite(file, logMessage);
+        FileSeek(file, 0, SEEK_END);
+        FileWriteString(file, logMessage + "\r\n");
         FileClose(file);
     }
 }
